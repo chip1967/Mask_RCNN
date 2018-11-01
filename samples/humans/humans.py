@@ -143,6 +143,7 @@ class DensePoseDataSet(utils.Dataset):
         for image in self.image_set.images:
             if image.has_dp_data:
                 self.add_image('data', image_count, image)
+                image_count = image_count+1
         self.prepare()
 
     def load_image(self, image_id):

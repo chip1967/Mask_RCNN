@@ -148,7 +148,7 @@ class CocoData(object):
     def download_if_missing(dataset_dir, download):
         if not os.exists(os.join(dataset_dir, os.path.basename(download))):
             wget.download(download, os.path.join(dataset_dir,"/."))
-        else
+        else:
             print("No download required {} exists".format(os.path.join(dataset_dir, os.path.basename(download))))
 
     def get_data(dataset_dir, year, train_data=False):
