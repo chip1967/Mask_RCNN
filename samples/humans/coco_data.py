@@ -14,6 +14,7 @@ import sys
 import time
 import numpy as np
 import json
+import wget
 
 from abstract_data import *
 
@@ -143,47 +144,20 @@ class CocoData(object):
                               people=people)
             image_objs.append(image_obj)
         return ImageSet(image_objs)
+
+    def download_if_missing(dataset_dir, download):
+        if not os.exists(os.join(dataset_dir, os.path.basename(download))):
+            wget.download(download, os.path.join(dataset_dir,"/."))
+        else
+            print("No download required {} exists".format(os.path.join(dataset_dir, os.path.basename(download))))
+
+    def get_data(dataset_dir, year, train_data=False):
+        print("Downloading missing data for coco year {} [train_data={})".format(year, train_data))
+        if year == 2014:
+            for download in [ "https://s3.amazonaws.com/densepose/densepose_coco_2014_train.json",
+                              "https://s3.amazonaws.com/densepose/densepose_coco_2014_valminusminival.json",
+                              "wget https://s3.amazonaws.com/densepose/densepose_coco_2014_minival.json",
+                              "wget https://s3.amazonaws.com/densepose/densepose_coco_2014_test.json"
+            ] :
+                download_if_missing(dataset_dir, download)
     
-    """
-    def image_path(self, image_id) :
-        img           = self.coco.imgs[image_id]
-        image_path    = os.path.join(self.dataset_dir, "images", "{}{}".format(self.subset, self.year), img["file_name"])
-        return image_path
-
-    def load_image(self, image_id) :
-        image_path    = self.image_path(image_id)
-        image         = skimage.io.imread(image_path)
-        return image
-
-    def load_panoptic_image(self, image_id) :
-        ann = self.panoptic.anns[image_id]
-        panoptic_image_path = os.path.join(self.dataset_dir, "images", "panoptic_{}{}".format(self.subset, self.year), ann["file_name"])
-        image         = skimage.io.imread(panoptic_image_path)
-        return image
-        
-    def show_examples(self, pos = None) :
-        if pos is None:
-            pos = np.random.randint(1,len(self.coco.imgs))
-        coco_image_id = list(self.coco.imgs.keys())[pos-1]
-        img           = self.coco.imgs[coco_image_id]
-        image         = self.load_image(coco_image_id)
-        fig = plt.figure(figsize=(15,10))
-        gs = gridspec.GridSpec(2, 2)
-        ax1 = plt.subplot(gs[0, 0])
-        ax2 = plt.subplot(gs[1, 0])
-        ax3 = plt.subplot(gs[0, 1])
-        ax4 = plt.subplot(gs[1, 1])
-        ax1.imshow(image)
-        plt.sca(ax1)
-        self.coco.showAnns(self.coco.loadAnns(self.coco.getAnnIds(imgIds=[coco_image_id])))
-        Self.person_keypoints.showAnns(self.person_keypoints.loadAnns(self.person_keypoints.getAnnIds(imgIds=[coco_image_id])))
-        panoptic_image = self.load_panoptic_image(coco_image_id)
-        ax2.imshow(panoptic_image)
-        ann = self.panoptic.anns[coco_image_id]
-        print("Segments")
-        for segment in ann['segments_info']:
-            category = self.panoptic.cats[segment['category_id']]
-            super_category_name = category['supercategory']
-            print("\t{}<{}:{}".format(category["name"],super_category_name,segment))
-        plt.show()
-    """

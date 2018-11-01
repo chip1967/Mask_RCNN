@@ -693,6 +693,12 @@ def load_data(data_type, dataset, subset, **kwargs):
         raise Exception("Unkown data {}".format(args.data_type))
     return data
 
+def get_data(args):
+    if data_type.upper() == "COCO":
+        CocoData.get_data(args.dataset, year=args.year, train_data=args.train_data)
+    else
+        print("Dont know how to get data for {}".format(data_type))
+
 def show_examples(args):
     data=load_data(**dict(args.__dict__))
     images = data.load_images()
@@ -771,6 +777,12 @@ if __name__ == '__main__':
 
     subparsers = parser.add_subparsers()
 
+    get_data_parser = subparsers.add_parser("get-data")
+    get_data_parser.add_argument('--train-data', dest="train_data", action="store_true")
+    get_data_parser.set_defaults(train_data=False)
+    get_data_parser.set_defaults(func=get_data)
+    add_common_args(get_data_parser)
+    
     show_examples_parser = subparsers.add_parser("show-examples")
     show_examples_parser.add_argument('--subset', required=False,
                                       choices=["train", "val", "minival", "valminusminival"],
