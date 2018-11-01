@@ -175,7 +175,7 @@ class Image(object):
         self.width      = width
 
     def __str__(self):
-        "Image[{},num people:{}]".format(self.image_data, len(self.people))
+        return "Image[{},num people:{}]".format(self.image_data, len(self.people))
 
     @property    
     def has_dp_data(self):

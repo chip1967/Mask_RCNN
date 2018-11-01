@@ -710,8 +710,10 @@ def show_examples(args):
         gs = gridspec.GridSpec(1, 1)
         ax1 = plt.subplot(gs[0, 0])
         plt.sca(ax1)
+        print("Showing image {}".format(image))
         image.show_image(person_index=person_index)
         plt.show()
+        plt.close()
 
 def train(args):
     train_args   = dict(args.__dict__, subset=args.train_subset)
