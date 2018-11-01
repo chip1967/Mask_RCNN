@@ -696,7 +696,7 @@ def load_data(data_type, dataset, subset, **kwargs):
 def get_data(args):
     if data_type.upper() == "COCO":
         CocoData.get_data(args.dataset, year=args.year, train_data=args.train_data)
-    else
+    else:
         print("Dont know how to get data for {}".format(data_type))
 
 def show_examples(args):
