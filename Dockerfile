@@ -8,7 +8,7 @@ RUN apt-get update && \
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install -r /tmp/requirements.txt
-# RUN pip3 install pycocotools	
+# RUN pip3 install pycocotools
 
 WORKDIR "/build"
 # RUN git clone https://github.com/chip1967/Mask_RCNN.git

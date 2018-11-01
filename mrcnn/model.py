@@ -1823,7 +1823,7 @@ class MaskRCNN():
     The actual Keras model is in the keras_model property.
     """
 
-    def __init__(self, mode, config, model_dir):
+    def __init__(self, mode, config, model_dir, custom_build_fpn_mask_graph):
         """
         mode: Either "training" or "inference"
         config: A Sub-class of the Config class
@@ -1832,6 +1832,10 @@ class MaskRCNN():
         assert mode in ['training', 'inference']
         self.mode = mode
         self.config = config
+        if custom_build_fpn_mask_graph:
+            self.custom_build_fpn_mask_graph = custom_build_fpn_mask_graph
+        else:
+            self.custom_build_fpn_mask_graph = build_fpn_mask_graph
         self.model_dir = model_dir
         self.set_log_dir()
         self.keras_model = self.build(mode=mode, config=config)
@@ -1997,11 +2001,11 @@ class MaskRCNN():
                                      train_bn=config.TRAIN_BN,
                                      fc_layers_size=config.FPN_CLASSIF_FC_LAYERS_SIZE)
 
-            mrcnn_mask = build_fpn_mask_graph(rois, mrcnn_feature_maps,
-                                              input_image_meta,
-                                              config.MASK_POOL_SIZE,
-                                              config.NUM_CLASSES,
-                                              train_bn=config.TRAIN_BN)
+            mrcnn_mask = self.custom_build_fpn_mask_graph(rois, mrcnn_feature_maps,
+                                                          input_image_meta,
+                                                          config.MASK_POOL_SIZE,
+                                                          config.NUM_CLASSES,
+                                                          train_bn=config.TRAIN_BN)
 
             # TODO: clean up (use tf.identify if necessary)
             output_rois = KL.Lambda(lambda x: x * 1, name="output_rois")(rois)
@@ -2045,11 +2049,11 @@ class MaskRCNN():
 
             # Create masks for detections
             detection_boxes = KL.Lambda(lambda x: x[..., :4])(detections)
-            mrcnn_mask = build_fpn_mask_graph(detection_boxes, mrcnn_feature_maps,
-                                              input_image_meta,
-                                              config.MASK_POOL_SIZE,
-                                              config.NUM_CLASSES,
-                                              train_bn=config.TRAIN_BN)
+            mrcnn_mask = self.custom_build_fpn_mask_graph(detection_boxes, mrcnn_feature_maps,
+                                                          input_image_meta,
+                                                          config.MASK_POOL_SIZE,
+                                                          config.NUM_CLASSES,
+                                                          train_bn=config.TRAIN_BN)
 
             model = KM.Model([input_image, input_image_meta, input_anchors],
                              [detections, mrcnn_class, mrcnn_bbox,
@@ -2274,7 +2278,10 @@ class MaskRCNN():
             "*epoch*", "{epoch:04d}")
 
     def train(self, train_dataset, val_dataset, learning_rate, epochs, layers,
-              augmentation=None, custom_callbacks=None, no_augmentation_sources=None):
+              augmentation=None,
+              custom_callbacks=None,
+              no_augmentation_sources=None,
+              use_multiprocessing=True):
         """Train the model.
         train_dataset, val_dataset: Training and validation Dataset objects.
         learning_rate: The learning rate to train with
@@ -2371,7 +2378,7 @@ class MaskRCNN():
             validation_steps=self.config.VALIDATION_STEPS,
             max_queue_size=100,
             workers=workers,
-            use_multiprocessing=True,
+            use_multiprocessing=use_multiprocessing,
         )
         self.epoch = max(self.epoch, epochs)
 

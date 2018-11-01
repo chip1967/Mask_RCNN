@@ -272,11 +272,11 @@ class Dataset(object):
             "name": class_name,
         })
 
-    def add_image(self, source, image_id, path, **kwargs):
+    def add_image(self, source, image_id, image, **kwargs):
         image_info = {
             "id": image_id,
             "source": source,
-            "path": path,
+            "image": image,
         }
         image_info.update(kwargs)
         self.image_info.append(image_info)
@@ -352,10 +352,13 @@ class Dataset(object):
         return self.image_info[image_id]["path"]
 
     def load_image(self, image_id):
+        return self.load_image_file(self.image_info[image_id]['path'])
+        
+    def load_image_file(self, file_name):
         """Load the specified image and return a [H,W,3] Numpy array.
         """
         # Load image
-        image = skimage.io.imread(self.image_info[image_id]['path'])
+        image = skimage.io.imread(file_name)
         # If grayscale. Convert to RGB for consistency.
         if image.ndim != 3:
             image = skimage.color.gray2rgb(image)

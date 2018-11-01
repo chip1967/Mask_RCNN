@@ -27,10 +27,22 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 """
 
 import os
+import fnmatch
 import sys
 import time
+import random
 import numpy as np
 import imgaug  # https://github.com/aleju/imgaug (pip3 install imgaug)
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.gridspec as gridspec
+import json
+import skimage.color
+import skimage.io
+import skimage.transform
+# to import matlab file
+import scipy.io
+
 
 # Download and install the Python COCO tools from https://github.com/waleedka/coco
 # That's a fork from the original https://github.com/pdollar/coco with a bug
@@ -46,13 +58,23 @@ import zipfile
 import urllib.request
 import shutil
 
+import keras.layers as KL
+import tensorflow as tf
+
 # Root directory of the project
 ROOT_DIR = os.path.abspath("../../")
 
 # Import Mask RCNN
 sys.path.append(ROOT_DIR)  # To find local version of the library
 from mrcnn.config import Config
-from mrcnn import model as modellib, utils
+from mrcnn import model as modellib
+from mrcnn import utils as utils
+from tf_smpl.batch_lbs import batch_rodrigues
+
+from abstract_data import *
+from coco_data import *
+from mpii_data import *
+from lsp_data import *
 
 # Path to trained weights file
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
@@ -77,7 +99,7 @@ class HumanConfig(Config):
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 1
 
     # Uncomment to train on 8 GPUs (default is 1)
     # GPU_COUNT = 8
@@ -85,17 +107,98 @@ class HumanConfig(Config):
     # Number of classes (including background)
     NUM_CLASSES = 2 # // 1 + 80  # COCO has 80 classes
 
+############################################################
+#  Data
+############################################################
+
+class H36Data:
+    
+    
+    def __init__(self,dataset_dir, subset):
+        pruint("TODO")
+
+class DataOcclusion(object):
+
+    def __init__(self, dataset_dir, subset):
+        print("DataOcclusion")
+        self.dataset_dir = dataset_dir
+        self.subset      = subset
+
+        
 
 ############################################################
 #  Dataset
 ############################################################
 
+class DensePoseDataSet(utils.Dataset):
+    
+    def __init__(self, image_data):
+        utils.Dataset.__init__(self)
+        self.coco_data = image_data
+
+    def load_prepare(self):
+        self.add_class("data", self.coco_data.person_cat['id'], self.coco_data.person_cat["name"])
+        self.image_set = self.coco_data.load_images()
+        image_count = 0
+        for image in self.image_set.images:
+            if image.has_dp_data:
+                self.add_image('data', image_count, image)
+        self.prepare()
+
+    def load_image(self, image_id):
+        image = self.image_set.images[image_id]
+        return image.image_data.read_image()
+    
+    def load_mask(self, image_id):
+        image = self.image_set.images[image_id]
+        person_class = self.map_source_class_id("data.{}".format(self.coco_data.person_cat['id']))
+        mask = np.stack([person.regions_to_mask(image) for person in image.people if person.regions is not None], axis=2).astype(np.bool)
+        class_ids = np.array([person_class for person in image.people if person.regions is not None], dtype=np.int32)
+        return mask, class_ids
+        
 class HumanDataset(utils.Dataset):
+
+    def __init__(self):
+        utils.Dataset.__init__(self)
+        
+    def load_prepare(self):
+        raise Exception("Expecting sub class")
+
+    def evaluate(self):
+        raise Exception("Expecting sub class")
+
+    def show_example(self, model):
+        raise Exception("Expecting sub class") 
+    
+class CocoHumanDataset(HumanDataset):
+    
+    def __init__(self, year=DEFAULT_DATASET_YEAR):
+        HumanDataset.__init__(self)
+        self.year = year
+        
+    def evaluate(self, model, limit=500) :
+        evaluate_coco(model, self, self.coco, "bbox", limit=int(limit))
+
+        
+    def load_prepare(self,
+                     dataset_dir, 
+                     is_train, 
+                     return_lib_object=False, 
+                     auto_download=False):
+        if is_train:
+            subset = "train"
+        else:
+            subset = "val"
+        self.load_coco(dataset_dir,
+                       subset,
+                       self.year,
+                       auto_download = auto_download)
+        self.prepare()
+        
     def load_coco(self, 
                   dataset_dir, 
                   subset, 
                   year=DEFAULT_DATASET_YEAR, 
-                  return_coco=False, 
                   auto_download=False):
         """Load a subset of the COCO dataset.
         dataset_dir: The root directory of the COCO dataset.
@@ -113,34 +216,43 @@ class HumanDataset(utils.Dataset):
 
         if subset == "minival" or subset == "valminusminival":
             subset = "val"
-        coco = COCO("{}/annotations/instances_{}{}.json".format(dataset_dir, subset, year))
-        image_dir = "{}/{}{}".format(dataset_dir, subset, year)
+        self.dataset_dir = dataset_dir
+        self.coco = COCO("{}/annotations/instances_{}{}.json".format(dataset_dir, subset, year))
+        self.person_keypoints = COCO("{}/annotations/person_keypoints_{}{}.json".format(dataset_dir, subset, year))
+        self.panoptic = COCO("{}/annotations/panoptic_{}{}.json".format(dataset_dir, subset, year))
+
+        image_dir = "{}/images/{}{}".format(dataset_dir, subset, year)
 
         # Load all classes or a subset?
-        class_ids = sorted(coco.getCatIds(catNms=["person"]))
+        class_ids = sorted(self.coco.getCatIds(catNms=["person"]))
 
         # All images or a subset?
         image_ids = []
         for id in class_ids:
-            image_ids.extend(list(coco.getImgIds(catIds=[id])))
+            image_ids.extend(list(self.coco.getImgIds(catIds=[id])))
             # Remove duplicates
         image_ids = list(set(image_ids))
 
         # Add classes
         for i in class_ids:
-            self.add_class("coco", i, coco.loadCats(i)[0]["name"])
+            self.add_class("coco", i, self.coco.loadCats(i)[0]["name"])
 
         # Add images
         for i in image_ids:
             self.add_image(
-                "coco", image_id=i,
-                path=os.path.join(image_dir, coco.imgs[i]['file_name']),
-                width=coco.imgs[i]["width"],
-                height=coco.imgs[i]["height"],
-                annotations=coco.loadAnns(coco.getAnnIds(
-                    imgIds=[i], catIds=class_ids, iscrowd=None)))
-        if return_coco:
-            return coco
+                "coco",
+                image_id=i,
+                path=os.path.join(image_dir, self.coco.imgs[i]['file_name']),
+                width=self.coco.imgs[i]["width"],
+                height=self.coco.imgs[i]["height"],
+                annotations=self.coco.loadAnns(self.coco.getAnnIds(imgIds=[i],
+                                                                   catIds=class_ids,
+                                                                   iscrowd=None)),
+                keypoints=self.person_keypoints.loadAnns(self.person_keypoints.getAnnIds(imgIds=[i],
+                                                                                         catIds=class_ids,
+                                                                                         iscrowd=None)),
+                panoptic=self.panoptic.loadAnns([i])
+            )
 
     def auto_download(self, dataDir, dataType, dataYear):
         """Download the COCO dataset/annotations if requested.
@@ -213,7 +325,6 @@ class HumanDataset(utils.Dataset):
                 zip_ref.extractall(unZipDir)
             print("... done unzipping")
         print("Will use annotations in " + annFile)
-
     def load_mask(self, image_id):
         """Load instance masks for the given image.
 
@@ -306,6 +417,10 @@ class HumanDataset(utils.Dataset):
 
 
 ############################################################
+#  H36 evaluation
+############################################################
+
+############################################################
 #  COCO Evaluation
 ############################################################
 
@@ -335,6 +450,8 @@ def build_coco_results(dataset, image_ids, rois, class_ids, scores, masks):
             results.append(result)
     return results
 
+def show_coco_examples(model, dataset, coco, image_ids=None):
+    print("Show coco examples")
 
 def evaluate_coco(model, dataset, coco, eval_type="bbox", limit=0, image_ids=None):
     """Runs official COCO evaluation.
@@ -387,11 +504,263 @@ def evaluate_coco(model, dataset, coco, eval_type="bbox", limit=0, image_ids=Non
         t_prediction, t_prediction / len(image_ids)))
     print("Total time: ", time.time() - t_start)
 
+############################################################
+#  Model
+############################################################
+
+# From HMR paper
+def Discriminator_separable_rotations(
+        poses,
+        shapes,
+        weight_decay,
+):
+    """
+    23 Discriminators on each joint + 1 for all joints + 1 for shape.
+    To share the params on rotations, this treats the 23 rotation matrices
+    as a "vertical image":
+    Do 1x1 conv, then send off to 23 independent classifiers.
+
+    Input:
+    - poses: N x 23 x 1 x 9, NHWC ALWAYS!!
+    - shapes: N x 10
+    - weight_decay: float
+
+    Outputs:
+    - prediction: N x (1+23) or N x (1+23+1) if do_joint is on.
+    - variables: tf variables
+    """
+    data_format = "NHWC"
+    with tf.name_scope("Discriminator_sep_rotations", [poses, shapes]):
+        with tf.variable_scope("D") as scope:
+            with slim.arg_scope(
+                [slim.conv2d, slim.fully_connected],
+                    weights_regularizer=slim.l2_regularizer(weight_decay)):
+                with slim.arg_scope([slim.conv2d], data_format=data_format):
+                    poses = slim.conv2d(poses, 32, [1, 1], scope='D_conv1')
+                    poses = slim.conv2d(poses, 32, [1, 1], scope='D_conv2')
+                    theta_out = []
+                    for i in range(0, 23):
+                        theta_out.append(
+                            slim.fully_connected(
+                                poses[:, i, :, :],
+                                1,
+                                activation_fn=None,
+                                scope="pose_out_j%d" % i))
+                    theta_out_all = tf.squeeze(tf.stack(theta_out, axis=1))
+
+                    # Do shape on it's own:
+                    shapes = slim.stack(
+                        shapes,
+                        slim.fully_connected, [10, 5],
+                        scope="shape_fc1")
+                    shape_out = slim.fully_connected(
+                        shapes, 1, activation_fn=None, scope="shape_final")
+                    """ Compute joint correlation prior!"""
+                    nz_feat = 1024
+                    poses_all = slim.flatten(poses, scope='vectorize')
+                    poses_all = slim.fully_connected(
+                        poses_all, nz_feat, scope="D_alljoints_fc1")
+                    poses_all = slim.fully_connected(
+                        poses_all, nz_feat, scope="D_alljoints_fc2")
+                    poses_all_out = slim.fully_connected(
+                        poses_all,
+                        1,
+                        activation_fn=None,
+                        scope="D_alljoints_out")
+                    out = tf.concat([theta_out_all,
+                                     poses_all_out, shape_out], 1)
+
+            variables = tf.contrib.framework.get_variables(scope)
+            return out, variables
+
+
+def humans_build_fpn_mask_graph(rois, feature_maps, image_meta,
+                                pool_size, num_classes, train_bn=True):
+    """Builds the computation graph of the mask head of Feature Pyramid Network.
+
+    rois: [batch, num_rois, (y1, x1, y2, x2)] Proposal boxes in normalized
+          coordinates.
+    feature_maps: List of feature maps from different layers of the pyramid,
+                  [P2, P3, P4, P5]. Each has a different resolution.
+    image_meta: [batch, (meta data)] Image details. See compose_image_meta()
+    pool_size: The width of the square feature map generated from ROI Pooling.
+    num_classes: number of classes, which determines the depth of the results
+    train_bn: Boolean. Train or freeze Batch Norm layers
+
+    Returns: Masks [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, NUM_CLASSES]
+    """
+    # ROI Pooling
+    # Shape: [batch, num_rois, MASK_POOL_SIZE, MASK_POOL_SIZE, channels]
+    x = modellib.PyramidROIAlign([pool_size, pool_size],
+                                 name="roi_align_mask")([rois, image_meta] + feature_maps)
+
+    # Conv layers
+    x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv1")(x)
+    x = KL.TimeDistributed(modellib.BatchNorm(),
+                           name='mrcnn_mask_bn1')(x, training=train_bn)
+    x = KL.Activation('relu')(x)
+
+    x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv2")(x)
+    x = KL.TimeDistributed(modellib.BatchNorm(),
+                           name='mrcnn_mask_bn2')(x, training=train_bn)
+    x = KL.Activation('relu')(x)
+
+    x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv3")(x)
+    x = KL.TimeDistributed(modellib.BatchNorm(),
+                           name='mrcnn_mask_bn3')(x, training=train_bn)
+    x = KL.Activation('relu')(x)
+
+    x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
+                           name="mrcnn_mask_conv4")(x)
+    x = KL.TimeDistributed(modellib.BatchNorm(),
+                           name='mrcnn_mask_bn4')(x, training=train_bn)
+    x = KL.Activation('relu')(x)
+
+    x = KL.TimeDistributed(KL.Conv2DTranspose(256, (2, 2), strides=2, activation="relu"),
+                           name="mrcnn_mask_deconv")(x)
+
+    x = KL.TimeDistributed(KL.Conv2D(num_classes, (1, 1), strides=1, activation="sigmoid"),
+                           name="mrcnn_mask")(x)
+    # Classes are
+    #      0 background
+    #      1 foreground (occluding figure)
+    #      2 human clothing
+    #      3 underlying human shape
+    # x = KL.TimeDistributed(KL.Conv2D(4, (1, 1), strides=1),
+    #                        name="mrcnn_mask")(x)
+    # x = KL.Activation('softmax')(x)
+
+    """
+    real_rotations = batch_rodrigues(tf.reshape(self.pose_loader, [-1, 3]))
+    real_rotations = tf.reshape(real_rotations, [-1, 24, 9])
+    # Ignoring global rotation. N x 23*9
+    # The # of real rotation is B*num_stage so it's balanced.
+    real_rotations = real_rotations[:, 1:, :]
+    all_fake_rotations = tf.reshape(
+        tf.concat(fake_rotations, 0),
+        [self.batch_size * self.num_stage, -1, 9])
+    comb_rotations = tf.concat(
+        [real_rotations, all_fake_rotations], 0, name="combined_pose")
+    
+    comb_rotations = tf.expand_dims(comb_rotations, 2)
+    all_fake_shapes = tf.concat(fake_shapes, 0)
+    comb_shapes = tf.concat(
+        [self.shape_loader, all_fake_shapes], 0, name="combined_shape")
+
+    disc_input = {
+        'weight_decay': self.d_wd,
+        'shapes': comb_shapes,
+        'poses': comb_rotations
+    }
+
+    d_out, d_var = Discriminator_separable_rotations(
+            **disc_input)
+    """
+    return x
+
+    
 
 ############################################################
 #  Training
 ############################################################
 
+def add_common_args(parser):
+    parser.add_argument('--dataset', required=True,
+                        metavar="/path/to/coco/",
+                        help='Directory of the dataset')
+    parser.add_argument('--data-type', required=False,
+                        choices=["COCO", "H36", "MPII", "LSP"],
+                        default="COCO",
+                        metavar="<COCO|H36|MPII|LSP>",
+                        help='Type of the input data')
+    parser.add_argument('--year', required=False,
+                        default=DEFAULT_DATASET_YEAR,
+                        metavar="<year>",
+                        help='Year of the MS-COCO dataset (2014 or 2017) (default=2014)')
+    
+def load_data(data_type, dataset, subset, **kwargs):
+    if data_type.upper() == "COCO":
+        data = CocoData(dataset,subset,kwargs['year'])
+    elif False:
+        if args.data_type.upper() == "MPII":
+            data = MpiiData(args.dataset,subset)
+        elif args.data_type.upper() == "LSP":
+            data = LspData(args.dataset,subset)
+    else:
+        raise Exception("Unkown data {}".format(args.data_type))
+    return data
+
+def show_examples(args):
+    data=load_data(**dict(args.__dict__))
+    images = data.load_images()
+    while True:
+        image = random.choice(images.images)
+        person_index = random.randint(0,len(image.people)-1)
+        fig = plt.figure(figsize=(15,10))
+        gs = gridspec.GridSpec(1, 1)
+        ax1 = plt.subplot(gs[0, 0])
+        plt.sca(ax1)
+        image.show_image(person_index=person_index)
+        plt.show()
+
+def train(args):
+    train_args   = dict(args.__dict__, subset=args.train_subset)
+    val_args     = dict(args.__dict__, subset=args.val_subset)
+    print(train_args)
+    data_train   = load_data(**train_args)
+    data_val     = load_data(**val_args) 
+    config       = HumanConfig()
+    config.display()
+    # build the model
+    model = modellib.MaskRCNN(mode="training",
+                              config=config,
+                              model_dir=args.logs,
+                              custom_build_fpn_mask_graph=humans_build_fpn_mask_graph)
+    model_path = args.model
+
+    dataset_train = DensePoseDataSet(data_train)
+    dataset_train.load_prepare()
+    
+    dataset_val = DensePoseDataSet(data_val)
+    dataset_val.load_prepare()
+    
+    print("Loading weights ", model_path)
+    model.load_weights(model_path,
+                       by_name=True,
+                       exclude=args.model_exclude)
+
+    
+    
+    # Training - Stage 1
+    print("Training network heads")
+    model.train(dataset_train,
+                dataset_val,
+                learning_rate=config.LEARNING_RATE,
+                epochs=40,
+                layers='heads',
+                augmentation=None,
+                use_multiprocessing=args.use_multiprocessing)
+    
+    # Training - Stage 2
+    # Finetune layers from ResNet stage 4 and up
+    print("Fine tune Resnet stage 4 and up")
+    model.train(dataset_train, dataset.coco,
+                learning_rate=config.LEARNING_RATE,
+                epochs=120,
+                layers='4+',
+                augmentation=None)
+    if False:
+        # Training - Stage 3
+        # Fine tune all layers
+        print("Fine tune all layers")
+        model.train(dataset_train, dataset_val,
+                    learning_rate=config.LEARNING_RATE / 10,
+                    epochs=160,
+                    layers='all',
+                    augmentation=None)
 
 if __name__ == '__main__':
     import argparse
@@ -399,99 +768,122 @@ if __name__ == '__main__':
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description='Train Mask R-CNN on MS COCO.')
-    parser.add_argument("command",
-                        metavar="<command>",
-                        help="'train' or 'evaluate' on MS COCO humans")
-    parser.add_argument('--dataset', required=True,
-                        metavar="/path/to/coco/",
-                        help='Directory of the MS-COCO dataset')
-    parser.add_argument('--year', required=False,
-                        default=DEFAULT_DATASET_YEAR,
-                        metavar="<year>",
-                        help='Year of the MS-COCO dataset (2014 or 2017) (default=2014)')
-    parser.add_argument('--model', required=True,
-                        metavar="/path/to/weights.h5",
-                        help="Path to weights .h5 file or 'coco'")
-    parser.add_argument('--logs', required=False,
-                        default=DEFAULT_LOGS_DIR,
-                        metavar="/path/to/logs/",
-                        help='Logs and checkpoints directory (default=logs/)')
-    parser.add_argument('--limit', required=False,
-                        default=500,
-                        metavar="<image count>",
-                        help='Images to use for evaluation (default=500)')
-    parser.add_argument('--download', required=False,
-                        default=False,
-                        metavar="<True|False>",
-                        help='Automatically download and unzip MS-COCO files (default=False)',
-                        type=bool)
+
+    subparsers = parser.add_subparsers()
+
+    show_examples_parser = subparsers.add_parser("show-examples")
+    show_examples_parser.add_argument('--subset', required=False,
+                                      choices=["train", "val", "minival", "valminusminival"],
+                                      default=None,
+                                      metavar="<train|val|minival|valminusminival>",
+                                      help='whether to use training or vaildation set')
+    show_examples_parser.set_defaults(func=show_examples)
+    add_common_args(show_examples_parser)
+    
+    train_parser = subparsers.add_parser("train")
+    train_parser.add_argument('--train-subset', required=False,
+                              choices=["train", "val", "minival", "valminusminival"],
+                              default=None,
+                              metavar="<train|val|minival|valminusminival>",
+                              help='whether to use training or vaildation set')
+    train_parser.add_argument('--val-subset', required=False,
+                              choices=["train", "val", "minival", "valminusminival"],
+                              default=None,
+                              metavar="<train|val|minival|valminusminival>",
+                              help='whether to use training or vaildation set')
+    train_parser.add_argument('--model', required=True,
+                              metavar="/path/to/weights.h5",
+                              help="Path to weights .h5 file or 'coco'")
+    train_parser.add_argument('--model-exclude',
+                              nargs='*',
+                              metavar="exclude model weights when loading model",
+                              help="Exclude model weights when loading. Only use in train mode")
+    train_parser.add_argument('--logs', required=False,
+                              default=DEFAULT_LOGS_DIR,
+                              metavar="/path/to/logs/",
+                              help='Logs and checkpoints directory (default=logs/)')
+    train_parser.add_argument('--limit', required=False,
+                              default=500,
+                              metavar="<image count>",
+                              help='Images to use for evaluation (default=500)')
+    train_parser.add_argument('--use-multiprocessing', dest='use_multiprocessing', action='store_true')
+    train_parser.add_argument('--no-multiprocessing', dest='use_multiprocessing', action='store_false')
+    train_parser.set_defaults(use_multiprocessing=True)
+    train_parser.set_defaults(func=train)
+    add_common_args(train_parser)
+
     args = parser.parse_args()
-    print("Command: ", args.command)
-    print("Model: ", args.model)
-    print("Dataset: ", args.dataset)
-    print("Year: ", args.year)
-    print("Logs: ", args.logs)
-    print("Auto Download: ", args.download)
+    print(args)
+    args.func(args)
+    """
+        # Configurations
+        if args.command == "train":
+            config = HumanConfig()
+        else:
+            class InferenceConfig(HumanConfig):
+                # Set batch size to 1 since we'll be running inference on
+                # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
+                GPU_COUNT = 1
+                IMAGES_PER_GPU = 1
+                DETECTION_MIN_CONFIDENCE = 0
+                
+            config = InferenceConfig()
+        config.display()
+                
+        # Create model
+        if args.command == "train":
+            model = modellib.MaskRCNN(mode="training",
+                                      config=config,
+                                      model_dir=args.logs,
+                                      custom_build_fpn_mask_graph=humans_build_fpn_mask_graph)
+        else:
+            model = modellib.MaskRCNN(mode="inference",
+                                      config=config,
+                                      model_dir=args.logs,
+                                      custom_build_fpn_mask_graph=humans_build_fpn_mask_graph)
 
-    # Configurations
+        # Select weights file to load
+        if args.model.lower() == "coco":
+            model_path = COCO_MODEL_PATH
+        elif args.model.lower() == "last":
+            # Find last trained weights
+            model_path = model.find_last()
+        elif args.model.lower() == "imagenet":
+            # Start from ImageNet trained weights
+            model_path = model.get_imagenet_weights()
+        else:
+            model_path = args.model
+
+        # Load weights
+        print("Loading weights ", model_path)
+        model.load_weights(model_path,
+                           by_name=True,
+                           exclude=["mrcnn_bbox_fc",
+                                    "mrcnn_bbox",
+                                    "mrcnn_mask",
+                                    "mrcnn_class_logits",
+                                    "mrcnn_class"
+                           ])
+
+    
+    if args.data_type == "COCO":
+        dataset = CocoHumanDataset(args.year)
+    elif  args.data_type == "H36":
+        dataset = H36HumanDataset()
+    else:
+        raise Exception("Unknown data type {typ}".format({typ:args.data_type}))
+    
     if args.command == "train":
-        config = HumanConfig()
+        is_train = True
     else:
-        class InferenceConfig(HumanConfig):
-            # Set batch size to 1 since we'll be running inference on
-            # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
-            GPU_COUNT = 1
-            IMAGES_PER_GPU = 1
-            DETECTION_MIN_CONFIDENCE = 0
-        config = InferenceConfig()
-    config.display()
-
-    # Create model
-    if args.command == "train":
-        model = modellib.MaskRCNN(mode="training", config=config,
-                                  model_dir=args.logs)
-    else:
-        model = modellib.MaskRCNN(mode="inference", config=config,
-                                  model_dir=args.logs)
-
-    # Select weights file to load
-    if args.model.lower() == "coco":
-        model_path = COCO_MODEL_PATH
-    elif args.model.lower() == "last":
-        # Find last trained weights
-        model_path = model.find_last()
-    elif args.model.lower() == "imagenet":
-        # Start from ImageNet trained weights
-        model_path = model.get_imagenet_weights()
-    else:
-        model_path = args.model
-
-    # Load weights
-    print("Loading weights ", model_path)
-    model.load_weights(model_path,
-                       by_name=True,
-                       exclude=["mrcnn_bbox_fc",
-                                "mrcnn_bbox",
-                                "mrcnn_mask",
-                                "mrcnn_class_logits",
-                                "mrcnn_class"
-                       ])
-
+        is_train = False
+        
+    dataset.load_prepare(args.dataset,
+                         is_train,
+                         auto_download=args.download)
+    
     # Train or evaluate
     if args.command == "train":
-        # Training dataset. Use the training set and 35K from the
-        # validation set, as as in the Mask RCNN paper.
-        dataset_train = HumanDataset()
-        dataset_train.load_coco(args.dataset, "train", year=args.year, auto_download=args.download)
-        if args.year in '2014':
-            dataset_train.load_coco(args.dataset, "valminusminival", year=args.year, auto_download=args.download)
-        dataset_train.prepare()
-
-        # Validation dataset
-        dataset_val = HumanDataset()
-        val_type = "val" if args.year in '2017' else "minival"
-        dataset_val.load_coco(args.dataset, val_type, year=args.year, auto_download=args.download)
-        dataset_val.prepare()
 
         # Image Augmentation
         # Right/Left flip 50% of the time
@@ -501,7 +893,7 @@ if __name__ == '__main__':
 
         # Training - Stage 1
         print("Training network heads")
-        model.train(dataset_train, dataset_val,
+        model.train(dataset_train, dataset.coco,
                     learning_rate=config.LEARNING_RATE,
                     epochs=40,
                     layers='heads',
@@ -510,30 +902,35 @@ if __name__ == '__main__':
         # Training - Stage 2
         # Finetune layers from ResNet stage 4 and up
         print("Fine tune Resnet stage 4 and up")
-        model.train(dataset_train, dataset_val,
+        model.train(dataset_train, dataset.coco,
                     learning_rate=config.LEARNING_RATE,
                     epochs=120,
                     layers='4+',
                     augmentation=augmentation)
-        """
-        # Training - Stage 3
-        # Fine tune all layers
-        print("Fine tune all layers")
-        model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE / 10,
-                    epochs=160,
-                    layers='all',
-                    augmentation=augmentation)
-        """
+        if False:
+           # Training - Stage 3
+           # Fine tune all layers
+           print("Fine tune all layers")
+           model.train(dataset_train, dataset_val,
+                       learning_rate=config.LEARNING_RATE / 10,
+                       epochs=160,
+                       layers='all',
+                       augmentation=augmentation)
 
     elif args.command == "evaluate":
         # Validation dataset
-        dataset_val = HumanDataset()
-        val_type = "val" # if args.year in '2017' else "minival"
-        coco = dataset_val.load_coco(args.dataset, val_type, year=args.year, return_coco=True, auto_download=args.download)
-        dataset_val.prepare()
         print("Running COCO evaluation on {} images.".format(args.limit))
-        evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))
+        if args.data_type == "COCO":
+            dataset.evaluate(model, dataset.coco, limit=int(args.limit))
+        else:
+            raise Exception("Evaluation not implemented for {}".format(args.data_type))
+    elif args.command == "show-examples":
+        print("Running COCO evaluation on {} images.".format(args.limit))
+        if args.data_type == "COCO":
+            dataset.show_examples(model)
+        else:
+            raise Exception("Evaluation not implemented for {}".format(args.data_type))
     else:
         print("'{}' is not recognized. "
               "Use 'train' or 'evaluate'".format(args.command))
+    """
