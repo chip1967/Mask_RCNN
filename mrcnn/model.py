@@ -1798,12 +1798,12 @@ class DataGenerator(keras.utils.Sequence):
                         batch_mrcnn_mask[b] = mrcnn_mask
                     
             except (GeneratorExit, KeyboardInterrupt):
-                print("Problem with image [2] {}".format(self.dataset.image_info[image_id].image.image_data))
+                print("Problem with image [2] {}".format(self.dataset.image_info[image_id]['image'].image_data))
                 raise
             except:
-                print("Problem with image {}".format(self.dataset.image_info[image_id].image.image_data))
+                print("Problem with image {}".format(self.dataset.image_info[image_id]['image'].image_data))
                 logging.exception("Error processing image {}".format(
-                    self.dataset.image_info[image_id].image.image_data))
+                    self.dataset.image_info[image_id]['image'].image_data))
                 raise
 
             b += 1
