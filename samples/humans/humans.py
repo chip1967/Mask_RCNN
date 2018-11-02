@@ -718,7 +718,6 @@ def show_examples(args):
 def train(args):
     train_args   = dict(args.__dict__, subset=args.train_subset)
     val_args     = dict(args.__dict__, subset=args.val_subset)
-    print(train_args)
     data_train   = load_data(**train_args)
     data_val     = load_data(**val_args) 
     config       = HumanConfig()
