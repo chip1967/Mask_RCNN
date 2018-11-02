@@ -727,7 +727,11 @@ def train(args):
                               config=config,
                               model_dir=args.logs,
                               custom_build_fpn_mask_graph=humans_build_fpn_mask_graph)
-    model_path = args.model
+    if args.model.lower() == "last":
+            # Find last trained weights
+        model_path = model.find_last()
+    else:
+        model_path = args.model
 
     dataset_train = DensePoseDataSet(data_train)
     dataset_train.load_prepare()
