@@ -32,6 +32,7 @@ import sys
 import time
 import random
 import numpy as np
+import logging
 import imgaug  # https://github.com/aleju/imgaug (pip3 install imgaug)
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -672,6 +673,8 @@ def add_common_args(parser):
     parser.add_argument('--dataset', required=True,
                         metavar="/path/to/coco/",
                         help='Directory of the dataset')
+    parser.add_argument('--debug', dest='debug', action='store_true')
+    parser.set_defaults(debug=False)                        
     parser.add_argument('--data-type', required=False,
                         choices=["COCO", "H36", "MPII", "LSP"],
                         default="COCO",
@@ -761,9 +764,9 @@ def train(args):
     # Training - Stage 2
     # Finetune layers from ResNet stage 4 and up
     print("Fine tune Resnet stage 4 and up")
-    model.train(dataset_train, dataset.coco,
+    model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
-                epochs=20,
+                epochs=5,
                 layers='4+',
                 augmentation=None)
     
@@ -772,7 +775,7 @@ def train(args):
     print("Fine tune all layers")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE / 10,
-                epochs=20,
+                epochs=5,
                 layers='all',
                 augmentation=None)
 
@@ -833,7 +836,14 @@ if __name__ == '__main__':
     add_common_args(train_parser)
 
     args = parser.parse_args()
-    print(args)
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+        logging.debug("Running humans")
+        print(args)
+    else:
+        logging.basicConfig(level=logging.INFO)
+        
     args.func(args)
     """
         # Configurations
