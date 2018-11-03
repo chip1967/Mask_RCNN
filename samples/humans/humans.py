@@ -719,6 +719,7 @@ def show_examples(args):
         plt.close()
 
 def train(args):
+    logging.info("training the model")
     train_args   = dict(args.__dict__, subset=args.train_subset)
     val_args     = dict(args.__dict__, subset=args.val_subset)
     data_train   = load_data(**train_args)
@@ -738,11 +739,11 @@ def train(args):
 
     dataset_train = DensePoseDataSet(data_train)
     dataset_train.load_prepare()
-    print("Training data set has {} images".format(len(dataset_train.image_info)))
+    logging.info("Training data set has {} images".format(len(dataset_train.image_info)))
     
     dataset_val = DensePoseDataSet(data_val)
     dataset_val.load_prepare()
-    print("Validation data set has {} images".format(len(dataset_val.image_info)))
+    logging.info("Validation data set has {} images".format(len(dataset_val.image_info)))
     
     print("Loading weights ", model_path)
     model.load_weights(model_path,
