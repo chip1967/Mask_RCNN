@@ -272,7 +272,7 @@ class Dataset(object):
             "name": class_name,
         })
 
-    def add_image(self, source, image_id, image, **kwargs):
+        def add_image(self, source, image_id, image, **kwargs):
         image_info = {
             "id": image_id,
             "source": source,

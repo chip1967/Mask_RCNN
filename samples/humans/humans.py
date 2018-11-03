@@ -735,9 +735,11 @@ def train(args):
 
     dataset_train = DensePoseDataSet(data_train)
     dataset_train.load_prepare()
+    print("Training data set has {} images".format(len(dataset_train.image_info)))
     
     dataset_val = DensePoseDataSet(data_val)
     dataset_val.load_prepare()
+    print("Validation data set has {} images".format(len(dataset_val.image_info)))
     
     print("Loading weights ", model_path)
     model.load_weights(model_path,
@@ -751,7 +753,7 @@ def train(args):
     model.train(dataset_train,
                 dataset_val,
                 learning_rate=config.LEARNING_RATE,
-                epochs=40,
+                epochs=13,
                 layers='heads',
                 augmentation=None,
                 use_multiprocessing=args.use_multiprocessing)
@@ -761,18 +763,18 @@ def train(args):
     print("Fine tune Resnet stage 4 and up")
     model.train(dataset_train, dataset.coco,
                 learning_rate=config.LEARNING_RATE,
-                epochs=120,
+                epochs=20,
                 layers='4+',
                 augmentation=None)
-    if False:
-        # Training - Stage 3
-        # Fine tune all layers
-        print("Fine tune all layers")
-        model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE / 10,
-                    epochs=160,
-                    layers='all',
-                    augmentation=None)
+    
+    # Training - Stage 3
+    # Fine tune all layers
+    print("Fine tune all layers")
+    model.train(dataset_train, dataset_val,
+                learning_rate=config.LEARNING_RATE / 10,
+                epochs=20,
+                layers='all',
+                augmentation=None)
 
 if __name__ == '__main__':
     import argparse
