@@ -670,11 +670,13 @@ def humans_build_fpn_mask_graph(rois, feature_maps, image_meta,
 ############################################################
 
 def add_common_args(parser):
+    parser.add_argument('--debug', dest='debug', action='store_true')
+    parser.set_defaults(debug=False)                        
+
+def add_data_common_args(parser):
     parser.add_argument('--dataset', required=True,
                         metavar="/path/to/coco/",
                         help='Directory of the dataset')
-    parser.add_argument('--debug', dest='debug', action='store_true')
-    parser.set_defaults(debug=False)                        
     parser.add_argument('--data-type', required=False,
                         choices=["COCO", "H36", "MPII", "LSP"],
                         default="COCO",
@@ -776,9 +778,35 @@ def train(args):
     logging.info("Fine tune all layers")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE / 10,
-                epochs=5,
+                epochs=18,
                 layers='all',
                 augmentation=None)
+
+def eval_image(args):
+    # build the model
+    config       = HumanConfig()
+    model = modellib.MaskRCNN(mode="inference",
+                              config=config,
+                              model_dir=args.logs,
+                              custom_build_fpn_mask_graph=humans_build_fpn_mask_graph)
+    if args.model.lower() == "last":
+            # Find last trained weights
+        model_path = model.find_last()
+    else:
+        model_path = args.model
+
+    logging.info("Loading weights %s", model_path)
+    model.load_weights(model_path,
+                       by_name=True,
+                       exclude=args.model_exclude)
+
+    image = ImageFile(args.image_path).load_image()
+    results = model.detect([image], verbose=1)
+    
+    
+    
+
+    
 
 if __name__ == '__main__':
     import argparse
@@ -794,6 +822,7 @@ if __name__ == '__main__':
     get_data_parser.set_defaults(train_data=False)
     get_data_parser.set_defaults(func=get_data)
     add_common_args(get_data_parser)
+    add_data_common_args(get_data_parser)
     
     show_examples_parser = subparsers.add_parser("show-examples")
     show_examples_parser.add_argument('--subset', required=False,
@@ -803,6 +832,7 @@ if __name__ == '__main__':
                                       help='whether to use training or vaildation set')
     show_examples_parser.set_defaults(func=show_examples)
     add_common_args(show_examples_parser)
+    add_data_common_args(show_examples_parser)
     
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument('--train-subset', required=False,
@@ -835,7 +865,21 @@ if __name__ == '__main__':
     train_parser.set_defaults(use_multiprocessing=True)
     train_parser.set_defaults(func=train)
     add_common_args(train_parser)
+    add_data_common_args(train_parser)
 
+    eval_image_parser = subparsers.add_parser("eval-image")
+    add_common_args(eval_image_parser)    
+    eval_image_parser.add_argument('--model', required=True,
+                                   metavar="/path/to/weights.h5",
+                                   help="Path to weights .h5 file or 'coco'")
+    eval_image_parser.add_argument('--logs', required=False,
+                                   default=DEFAULT_LOGS_DIR,
+                                   metavar="/path/to/logs/",
+                                   help='Logs and checkpoints directory (default=logs/)')
+    eval_image_parser.add_argument('--image-path', required=True,
+                                   metavar="/path/to/image",
+                                   help="Path to image to evaluate")
+    eval_image_parser.set_defaults(func=eval_image)
     args = parser.parse_args()
 
     FORMAT = '%(asctime)-15s %(message)s'
