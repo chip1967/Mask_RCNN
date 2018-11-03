@@ -838,12 +838,13 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    FORMAT = '%(asctime)-15s %(message)s'
     if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format=FORMAT)
         logging.debug("Running humans")
         print(args)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO, format=FORMAT)
         
     args.func(args)
     """
