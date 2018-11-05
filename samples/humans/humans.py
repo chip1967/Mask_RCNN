@@ -767,6 +767,9 @@ def get_data(args):
     else:
         logging.error("Dont know how to get data for {}".format(data_type))
 
+    if data_type.upper() == "VOD":
+        print("http://host.robots.ox.ac.uk/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar")
+
 def show_examples(args):
     logging.debug("Performing action show-examples")
     data=load_data(**dict(args.__dict__))

@@ -45,8 +45,8 @@ class DataOccluder(object):
         annotation_paths = DataOccluder.list_filepaths(os.path.join(pascal_voc_root_path, 'Annotations'))
         for annotation_path in annotation_paths:
 
-            if len(occluders) > 100:
-                 continue
+            # if len(occluders) > 100:
+            #      continue
             
             xml_root = xml.etree.ElementTree.parse(annotation_path).getroot()
             is_segmented = (xml_root.find('segmented').text != '0')
