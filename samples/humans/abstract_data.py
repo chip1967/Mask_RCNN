@@ -32,6 +32,7 @@ import cv2
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.gridspec as gridspec
+import logging
 from pycocotools import mask as mask_utils
 
 ############################################################
@@ -175,11 +176,19 @@ class Image(object):
                  image_data,
                  height,
                  width,
-                 people):
+                 people,
+                 occlusions=None):
         self.image_data = image_data
         self.people     = people
         self.height     = height
         self.width      = width
+        self.occlusions = occlusions
+
+    def create_occlusion_mask(self):
+        mask = np.zeros((self.height, self.width), dtype='int')
+        for occlusion in self.occlusions:
+            occlusion.add_to_mask(mask)
+        return mask
 
     def __str__(self):
         return "Image[{},num people:{}]".format(self.image_data, len(self.people))
@@ -193,16 +202,27 @@ class Image(object):
         image  = self.image_data.read_image()
         plt.imshow(image)
         plt.axis('off')
+
+    def show_joints(self, person_index):
+        person = self.people[person_index]
+        image  = self.image_data.read_image()
         if person.joints is not None:
             for connection in JointPositions.JOINT_CONNECTIONS:
                 possible_joints   = [person.get_joint(joint) for joint in connection]
                 joint_x = np.array([ joint.x for joint in possible_joints if joint is not None])
                 joint_y = np.array([ joint.y for joint in possible_joints if joint is not None])
                 plt.plot(joint_x, joint_y)
+                
+    def show_regions(self, person_index):
+        person = self.people[person_index]
+        image  = self.image_data.read_image()
         if person.regions is not None:
             for region in person.regions:
                 region = np.append(region, [region[0]], axis=0)
                 plt.plot(region[:,0], region[:,1])
+    def show_dp_data(self, person_index):
+        person = self.people[person_index]
+        image  = self.image_data.read_image()
         if person.dp_data is not None and person.bbox is not None:
             point_x = np.array(person.dp_data['dp_x'])/ 255. * person.bbox[2] # Strech the points to current box.
             point_y = np.array(person.dp_data['dp_y'])/ 255. * person.bbox[3] # Strech the points to current box.
@@ -233,6 +253,20 @@ class Image(object):
             mask_vis[:,:,:] = mask_vis[:,:,:]/255.0
             mask_vis[:,:,3][mask_bool_size] = 0.25
             plt.imshow(mask_vis, extent=(0, image.shape[1], image.shape[0], 0))
+
+    def show_occlusions(self, person_index):
+        person = self.people[person_index]
+        image  = self.image_data.read_image()            
+        if self.occlusions is not None:
+            mask = self.create_occlusion_mask()
+            logging.debug("Created occlusion mask %s", np.sum(mask) / 1.0 / image.shape[0] / image.shape[1])
+            mask_image = np.zeros((image.shape[0], image.shape[1], 4))
+            mask_image[mask,0] = 0.5 
+            mask_image[mask,1] = 0.5 
+            mask_image[mask,3] = 0.8
+            print(mask)
+            plt.imshow(mask, extent=(0, image.shape[1], image.shape[0], 0))
+            
 
 class ImageSet(object):
 

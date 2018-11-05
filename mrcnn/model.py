@@ -1,6 +1,6 @@
 """
 Mask R-CNN
-The main Mask R-CNN model implementation.
+The mainMask R-CNN model implementation.
 
 Copyright (c) 2017 Matterport, Inc.
 Licensed under the MIT License (see LICENSE for details)
@@ -613,7 +613,7 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
 
     # Threshold mask pixels at 0.5 to have GT masks be 0 or 1 to use with
     # binary cross entropy loss.
-    masks = tf.round(masks)
+    masks = tf.cast(tf.round(masks), tf.uint8)
 
     # Append negative ROIs and pad bbox deltas and masks that
     # are not used for negative ROIs with zeros.
@@ -1681,29 +1681,30 @@ class DataGenerator(keras.utils.Sequence):
     def __init__(self,dataset, config, shuffle=True, augment=False, augmentation=None,
                  random_rois=0, batch_size=1, detection_targets=False,
                  no_augmentation_sources=None):
-      self.dataset = dataset
-      self.config = config
-      self.augment = augment
-      self.augmentation = augmentation
-      self.batch_size = batch_size
-      self.random_rois = random_rois
-      self.detection_targets = detection_targets
-      self.no_augmentation_sources = no_augmentation_sources or []
-      self.b = 0  # batch item index
-      self.image_ids = np.copy(dataset.image_ids)
-      if shuffle:
-          np.random.shuffle(self.image_ids)
+        logging.debug("Creating data sequencer batch size %s", batch_size)
+        self.dataset = dataset
+        self.config = config
+        self.augment = augment
+        self.augmentation = augmentation
+        self.batch_size = batch_size
+        self.random_rois = random_rois
+        self.detection_targets = detection_targets
+        self.no_augmentation_sources = no_augmentation_sources or []
+        self.b = 0  # batch item index
+        self.image_ids = np.copy(dataset.image_ids)
+        if shuffle:
+            np.random.shuffle(self.image_ids)
 
-      self.error_count = 0
-
-      # Anchors
-      # [anchor_count, (y1, x1, y2, x2)]
-      backbone_shapes = compute_backbone_shapes(config, config.IMAGE_SHAPE)
-      self.anchors = utils.generate_pyramid_anchors(config.RPN_ANCHOR_SCALES,
-                                                    config.RPN_ANCHOR_RATIOS,
-                                                    backbone_shapes,
-                                                    config.BACKBONE_STRIDES,
-                                                    config.RPN_ANCHOR_STRIDE)
+        self.error_count = 0
+            
+        # Anchors
+        # [anchor_count, (y1, x1, y2, x2)]
+        backbone_shapes = compute_backbone_shapes(config, config.IMAGE_SHAPE)
+        self.anchors = utils.generate_pyramid_anchors(config.RPN_ANCHOR_SCALES,
+                                                      config.RPN_ANCHOR_RATIOS,
+                                                      backbone_shapes,
+                                                      config.BACKBONE_STRIDES,
+                                                      config.RPN_ANCHOR_STRIDE)
 
     def __len__(self) :
         return math.ceil(len(self.image_ids)/ self.batch_size)
@@ -1798,10 +1799,10 @@ class DataGenerator(keras.utils.Sequence):
                         batch_mrcnn_mask[b] = mrcnn_mask
                     
             except (GeneratorExit, KeyboardInterrupt):
-                print("Problem with image [2] {}".format(self.dataset.image_info[image_id]['image'].image_data))
+                print("Problem with image [2] {} {}".format(image_id, self.dataset.image_info[image_id]['image'].image_data))
                 raise
             except:
-                print("Problem with image {}".format(self.dataset.image_info[image_id]['image'].image_data))
+                print("Problem with image {} {}".format(image_id, self.dataset.image_info[image_id]['image'].image_data))
                 logging.exception("Error processing image {}".format(
                     self.dataset.image_info[image_id]['image'].image_data))
                 raise
@@ -2045,7 +2046,12 @@ class MaskRCNN():
     The actual Keras model is in the keras_model property.
     """
 
-    def __init__(self, mode, config, model_dir, custom_build_fpn_mask_graph):
+    def __init__(self,
+                 mode,
+                 config,
+                 model_dir,
+                 custom_build_fpn_mask_graph,
+                 custom_mrcnn_mask_loss_graph):
         """
         mode: Either "training" or "inference"
         config: A Sub-class of the Config class
@@ -2058,6 +2064,10 @@ class MaskRCNN():
             self.custom_build_fpn_mask_graph = custom_build_fpn_mask_graph
         else:
             self.custom_build_fpn_mask_graph = build_fpn_mask_graph
+        if custom_mrcnn_mask_loss_graph:
+            self.custom_mrcnn_mask_loss_graph = custom_mrcnn_mask_loss_graph
+        else:
+            self.custom_mrcnn_mask_loss_graph = mrcnn_mask_loss_graph
         self.model_dir = model_dir
         self.set_log_dir()
         self.keras_model = self.build(mode=mode, config=config)
@@ -2212,7 +2222,7 @@ class MaskRCNN():
             # Subsamples proposals and generates target outputs for training
             # Note that proposal class IDs, gt_boxes, and gt_masks are zero
             # padded. Equally, returned rois and targets are zero padded.
-            rois, target_class_ids, target_bbox, target_mask =\
+            rois, target_class_ids, target_bbox, target_mask  =\
                 DetectionTargetLayer(config, name="proposal_targets")([
                     target_rois, input_gt_class_ids, gt_boxes, input_gt_masks])
 
@@ -2242,7 +2252,7 @@ class MaskRCNN():
                 [target_class_ids, mrcnn_class_logits, active_class_ids])
             bbox_loss = KL.Lambda(lambda x: mrcnn_bbox_loss_graph(*x), name="mrcnn_bbox_loss")(
                 [target_bbox, target_class_ids, mrcnn_bbox])
-            mask_loss = KL.Lambda(lambda x: mrcnn_mask_loss_graph(*x), name="mrcnn_mask_loss")(
+            mask_loss = KL.Lambda(lambda x: self.custom_mrcnn_mask_loss_graph(*x), name="mrcnn_mask_loss")(
                 [target_mask, target_class_ids, mrcnn_mask])
 
             # log summaries of the losses

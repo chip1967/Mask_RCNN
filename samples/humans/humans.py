@@ -43,6 +43,12 @@ import skimage.io
 import skimage.transform
 # to import matlab file
 import scipy.io
+import keras.backend as K
+import keras.layers as KL
+import keras.engine as KE
+import keras.models as KM
+import keras.activations as KA
+import keras.utils as KU
 
 
 # Download and install the Python COCO tools from https://github.com/waleedka/coco
@@ -59,7 +65,6 @@ import zipfile
 import urllib.request
 import shutil
 
-import keras.layers as KL
 import tensorflow as tf
 
 # Root directory of the project
@@ -76,6 +81,7 @@ from abstract_data import *
 from coco_data import *
 from mpii_data import *
 from lsp_data import *
+from occlude_data import *
 
 # Path to trained weights file
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
@@ -118,15 +124,6 @@ class H36Data:
     def __init__(self,dataset_dir, subset):
         pruint("TODO")
 
-class DataOcclusion(object):
-
-    def __init__(self, dataset_dir, subset):
-        print("DataOcclusion")
-        self.dataset_dir = dataset_dir
-        self.subset      = subset
-
-        
-
 ############################################################
 #  Dataset
 ############################################################
@@ -135,11 +132,11 @@ class DensePoseDataSet(utils.Dataset):
     
     def __init__(self, image_data):
         utils.Dataset.__init__(self)
-        self.coco_data = image_data
+        self.image_data = image_data
 
     def load_prepare(self):
-        self.add_class("data", self.coco_data.person_cat['id'], self.coco_data.person_cat["name"])
-        self.image_set = self.coco_data.load_images()
+        self.add_class("data", self.image_data.person_cat['id'], self.image_data.person_cat["name"])
+        self.image_set = self.image_data.load_images()
         image_count = 0
         for image in self.image_set.images:
             if image.has_dp_data:
@@ -150,13 +147,19 @@ class DensePoseDataSet(utils.Dataset):
     def load_image(self, image_id):
         image = self.image_set.images[image_id]
         return image.image_data.read_image()
+
+    def merge_occlusion(mask, occlusion_mask):
+        mask[occlusion_mask] = 2
+        return mask
     
     def load_mask(self, image_id):
         image = self.image_set.images[image_id]
-        person_class = self.map_source_class_id("data.{}".format(self.coco_data.person_cat['id']))
-        mask = np.stack([person.regions_to_mask(image) for person in image.people if person.regions is not None], axis=2).astype(np.bool)
+        occlusion_mask = image.create_occlusion_mask()
+        person_class = self.map_source_class_id("data.{}".format(self.image_data.person_cat['id']))
+        mask = np.stack([DensePoseDataSet.merge_occlusion(person.regions_to_mask(image), occlusion_mask) for person in image.people if person.regions is not None], axis=2).astype(np.bool)
         class_ids = np.array([person_class for person in image.people if person.regions is not None], dtype=np.int32)
         return mask, class_ids
+        
         
 class HumanDataset(utils.Dataset):
 
@@ -624,8 +627,15 @@ def humans_build_fpn_mask_graph(rois, feature_maps, image_meta,
     x = KL.TimeDistributed(KL.Conv2DTranspose(256, (2, 2), strides=2, activation="relu"),
                            name="mrcnn_mask_deconv")(x)
 
-    x = KL.TimeDistributed(KL.Conv2D(num_classes, (1, 1), strides=1, activation="sigmoid"),
-                           name="mrcnn_mask")(x)
+    x =  KL.TimeDistributed(KL.Conv2D(num_classes*3, (1, 1), strides=1), name="mrcnn_mask")(x)
+    
+    def mcrnn_mask_softmax(t):
+        t_shape = tf.shape(t)
+        t = tf.reshape(t,[-1,t_shape[1], t_shape[2], num_classes,3])
+        t = KA.softmax(t, axis=3)
+        return t
+    x = KL.TimeDistributed(KL.Lambda(mcrnn_mask_softmax))(x)
+
     # Classes are
     #      0 background
     #      1 foreground (occluding figure)
@@ -663,6 +673,50 @@ def humans_build_fpn_mask_graph(rois, feature_maps, image_meta,
     """
     return x
 
+def custom_mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
+    """Mask binary cross-entropy loss for the masks head.
+
+    target_masks: [batch, num_rois, height, width].
+        A float32 tensor of values 0, 1 or 2. Uses zero padding to fill array. (2 refers to an occlusion)
+    target_class_ids: [batch, num_rois]. Integer class IDs. Zero padded.
+    pred_masks: [batch, proposals, height, width, num_classes] float32 tensor
+                with values from 0 to 1.
+    roi_occlusion_masks [batch, num_rois, height, width]
+    """
+    # Reshape for simplicity. Merge first two dimensions into one.
+    target_class_ids = K.reshape(target_class_ids, (-1,))
+    mask_shape = tf.shape(target_masks)
+    target_masks = K.reshape(target_masks, (-1, mask_shape[2], mask_shape[3]))
+    pred_shape = tf.shape(pred_masks)
+    pred_masks = K.reshape(pred_masks,
+                           (-1, pred_shape[2], pred_shape[3], pred_shape[4], pred_shape[5]))
+    # Permute predicted masks to [N, num_classes, height, width]
+    pred_masks = tf.transpose(pred_masks, [0, 3, 1, 2, 4])
+
+    # Only positive ROIs contribute to the loss. And only
+    # the class specific mask of each ROI.
+    positive_ix = tf.where(target_class_ids > 0)[:, 0]
+    positive_class_ids = tf.cast(
+         tf.gather(target_class_ids, positive_ix), tf.int64)
+    indices = tf.stack([positive_ix, positive_class_ids], axis=1)
+
+    # Gather the masks (predicted and true) that contribute to loss
+    y_mask = tf.gather(target_masks, positive_ix)
+    y_pred = tf.gather_nd(pred_masks, indices)
+    y_true = tf.one_hot(tf.cast(y_mask, 'uint8'), depth=3)
+
+    logging.debug("Shape y_true %s, y_pred %s", tf.shape(y_true), tf.shape(y_pred))
+    # Compute binary cross entropy. If no positive ROIs, then return 0.
+    # shape: [batch, roi, num_classes]
+    # loss = K.switch(tf.size(y_true) > 0,
+    #                 K.binary_crossentropy(target=y_true, output=y_pred),
+    #                 tf.constant(0.0))
+    loss = K.switch(tf.size(y_true) > 0,
+                    K.categorical_crossentropy(target=y_true, output=y_pred),
+                    tf.constant(0.0))
+    loss = K.mean(loss)
+    return loss
+
     
 
 ############################################################
@@ -686,8 +740,12 @@ def add_data_common_args(parser):
                         default=DEFAULT_DATASET_YEAR,
                         metavar="<year>",
                         help='Year of the MS-COCO dataset (2014 or 2017) (default=2014)')
+    parser.add_argument('--occlude-data-path', required=False,
+                        metavar="<path to VOC data>",
+                        help='Path to pascal VOC data for occlusion')
     
-def load_data(data_type, dataset, subset, **kwargs):
+def load_data(data_type, dataset, subset, occlude_data_path, **kwargs):
+    logging.debug("Loading data of type %sm=, subset %s from location %s", data_type, subset, dataset)
     if data_type.upper() == "COCO":
         data = CocoData(dataset,subset,kwargs['year'])
     elif False:
@@ -697,26 +755,44 @@ def load_data(data_type, dataset, subset, **kwargs):
             data = LspData(args.dataset,subset)
     else:
         raise Exception("Unkown data {}".format(args.data_type))
+    if occlude_data_path != None:
+        logging.debug("Adding occlusions to the data")
+        occluder = DataOccluder(occlude_data_path)
+        data = OccludedData(occluder, data)
     return data
 
 def get_data(args):
     if data_type.upper() == "COCO":
         CocoData.get_data(args.dataset, year=args.year, train_data=args.train_data)
     else:
-        print("Dont know how to get data for {}".format(data_type))
+        logging.error("Dont know how to get data for {}".format(data_type))
 
 def show_examples(args):
+    logging.debug("Performing action show-examples")
     data=load_data(**dict(args.__dict__))
     images = data.load_images()
     while True:
         image = random.choice(images.images)
         person_index = random.randint(0,len(image.people)-1)
         fig = plt.figure(figsize=(15,10))
-        gs = gridspec.GridSpec(1, 1)
+        gs = gridspec.GridSpec(2, 2)
         ax1 = plt.subplot(gs[0, 0])
+        ax2 = plt.subplot(gs[1, 0])
+        ax3 = plt.subplot(gs[0, 1])
+        ax4 = plt.subplot(gs[1, 1])
+        logging.info("Showing image {}".format(image))
         plt.sca(ax1)
-        print("Showing image {}".format(image))
         image.show_image(person_index=person_index)
+        image.show_regions(person_index=person_index)
+        image.show_joints(person_index=person_index)
+        plt.sca(ax2)
+        image.show_image(person_index=person_index)
+        image.show_dp_data(person_index=person_index)
+        plt.sca(ax3)
+        image.show_image(person_index=person_index)
+        plt.sca(ax4)
+        image.show_image(person_index=person_index)
+        image.show_occlusions(person_index=person_index)
         plt.show()
         plt.close()
 
@@ -732,7 +808,8 @@ def train(args):
     model = modellib.MaskRCNN(mode="training",
                               config=config,
                               model_dir=args.logs,
-                              custom_build_fpn_mask_graph=humans_build_fpn_mask_graph)
+                              custom_build_fpn_mask_graph=humans_build_fpn_mask_graph,
+                              custom_mrcnn_mask_loss_graph=custom_mrcnn_mask_loss_graph)
     if args.model.lower() == "last":
             # Find last trained weights
         model_path = model.find_last()
@@ -797,16 +874,38 @@ def eval_image(args):
 
     logging.info("Loading weights %s", model_path)
     model.load_weights(model_path,
-                       by_name=True,
-                       exclude=args.model_exclude)
+                       by_name=True)
 
-    image = ImageFile(args.image_path).load_image()
-    results = model.detect([image], verbose=1)
+    image = ImageFile(args.image_path).read_image()
+    results = model.detect([image], verbose=1)[0]
+    final_rois = results["rois"]
+    final_class_ids = results["class_ids"]
+    final_scores = results["scores"]
+    final_masks = results["masks"]
     
-    
-    
+    logging.debug("Number of ROI found %s", len(final_rois))
 
-    
+    fig = plt.figure(figsize=(15,10))
+    gs = gridspec.GridSpec(1, 1)
+    ax1 = plt.subplot(gs[0, 0])
+    plt.sca(ax1)
+    plt.imshow(image)
+
+    for i in range(len(final_rois)):
+        roi = final_rois[i]
+        class_id = final_class_ids[i]
+        score  = final_scores[i]
+        mask   = final_masks[:,:,i]
+        mask_bool = mask!=0
+        mask_colour = np.zeros((mask.shape[0], mask.shape[1],4))
+        mask_colour[:,:,0][mask_bool] = 1.0
+        mask_colour[:,:,1][mask_bool] = 0.0
+        mask_colour[:,:,2][mask_bool] = 1.0
+        mask_colour[:,:,3][mask_bool] = 0.8
+        logging.debug("Mask %s Class id %s with score %s", i, class_id, score) 
+        plt.imshow(mask_colour)
+    plt.show()
+    plt.close()
 
 if __name__ == '__main__':
     import argparse
@@ -881,15 +980,15 @@ if __name__ == '__main__':
                                    help="Path to image to evaluate")
     eval_image_parser.set_defaults(func=eval_image)
     args = parser.parse_args()
-
-    FORMAT = '%(asctime)-15s %(message)s'
+    FORMAT = '%(asctime)-15s %(levelname)s %(name)s : %(message)s'
     if args.debug:
         logging.basicConfig(level=logging.DEBUG, format=FORMAT)
-        logging.debug("Running humans")
-        print(args)
+        logging.debug("Running humans [DEBUG]")
     else:
         logging.basicConfig(level=logging.INFO, format=FORMAT)
+        logging.info("Running humans")
         
+    logging.debug("Parsed args %s", args)
     args.func(args)
     """
         # Configurations
@@ -1010,3 +1109,4 @@ if __name__ == '__main__':
         print("'{}' is not recognized. "
               "Use 'train' or 'evaluate'".format(args.command))
     """
+

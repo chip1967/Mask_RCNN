@@ -2,5 +2,5 @@
 	path = tf_smpl
 	url = https://github.com/blzq/tf_smpl
 [submodule "synthetic_occlusion"]
-	path = synthetic-occlusion
+	path = synthetic_occlusion
 	url = https://github.com/isarandi/synthetic-occlusion.git
