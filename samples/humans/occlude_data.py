@@ -218,7 +218,9 @@ class OccludedImageData(ImageData):
 class OccludedImages(ImageSet):
 
     def __init__(self, occluder, imageset):
+        logging.debug("Adding occlusion information to images")
         occluded_images = [occluder.make_occluded_image(image) for image in imageset.images]
+        logging.debug("Added occlusion information to images")
         ImageSet.__init__(self, occluded_images)
 
 class OccludedData(object):

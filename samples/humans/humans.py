@@ -705,7 +705,7 @@ def custom_mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
     y_pred = tf.gather_nd(pred_masks, indices)
     y_true = tf.one_hot(tf.cast(y_mask, 'uint8'), depth=3)
 
-    logging.debug("Shape y_true %s, y_pred %s", tf.shape(y_true), tf.shape(y_pred))
+    # logging.debug("Shape y_true %s, y_pred %s", tf.shape(y_true), tf.shape(y_pred))
     # Compute binary cross entropy. If no positive ROIs, then return 0.
     # shape: [batch, roi, num_classes]
     # loss = K.switch(tf.size(y_true) > 0,
