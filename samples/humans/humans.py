@@ -154,12 +154,10 @@ class DensePoseDataSet(utils.Dataset):
     
     def load_mask(self, image_id):
         image = self.image_set.images[image_id]
-        occlusion_mask = image.create_occlusion_mask()
+        mask  = image.load_masks()
         person_class = self.map_source_class_id("data.{}".format(self.image_data.person_cat['id']))
-        mask = np.stack([DensePoseDataSet.merge_occlusion(person.regions_to_mask(image), occlusion_mask) for person in image.people if person.regions is not None], axis=2).astype(np.bool)
         class_ids = np.array([person_class for person in image.people if person.regions is not None], dtype=np.int32)
         return mask, class_ids
-        
         
 class HumanDataset(utils.Dataset):
 
@@ -723,6 +721,24 @@ def custom_mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
 #  Training
 ############################################################
 
+def load_model(mode="inference", config=None, logs=None, model=None, model_exclude=None):
+    rcnn_model = modellib.MaskRCNN(mode=mode,
+                              config=config,
+                              model_dir=logs,
+                              custom_build_fpn_mask_graph=humans_build_fpn_mask_graph,
+                              custom_mrcnn_mask_loss_graph=custom_mrcnn_mask_loss_graph)
+    if model is not None and model.lower() == "last":
+            # Find last trained weights
+        model_path = model.find_last()
+    else:
+        model_path = model
+    print("Loading weights ", model_path)
+    rcnn_model.load_weights(model_path,
+                       by_name=True,
+                       exclude=model_exclude)
+    return rcnn_model
+
+
 def add_common_args(parser):
     parser.add_argument('--debug', dest='debug', action='store_true')
     parser.set_defaults(debug=False)                        
@@ -793,6 +809,7 @@ def show_examples(args):
         image.show_dp_data(person_index=person_index)
         plt.sca(ax3)
         image.show_image(person_index=person_index)
+        image.show_mask(person_index=person_index)
         plt.sca(ax4)
         image.show_image(person_index=person_index)
         image.show_occlusions(person_index=person_index)
@@ -808,16 +825,7 @@ def train(args):
     config       = HumanConfig()
     config.display()
     # build the model
-    model = modellib.MaskRCNN(mode="training",
-                              config=config,
-                              model_dir=args.logs,
-                              custom_build_fpn_mask_graph=humans_build_fpn_mask_graph,
-                              custom_mrcnn_mask_loss_graph=custom_mrcnn_mask_loss_graph)
-    if args.model.lower() == "last":
-            # Find last trained weights
-        model_path = model.find_last()
-    else:
-        model_path = args.model
+    model = load_model(mode="training",config=config,**args)
 
     dataset_train = DensePoseDataSet(data_train)
     dataset_train.load_prepare()
@@ -826,11 +834,6 @@ def train(args):
     dataset_val = DensePoseDataSet(data_val)
     dataset_val.load_prepare()
     logging.info("Validation data set has {} images".format(len(dataset_val.image_info)))
-    
-    print("Loading weights ", model_path)
-    model.load_weights(model_path,
-                       by_name=True,
-                       exclude=args.model_exclude)
 
     
     
@@ -865,19 +868,7 @@ def train(args):
 def eval_image(args):
     # build the model
     config       = HumanConfig()
-    model = modellib.MaskRCNN(mode="inference",
-                              config=config,
-                              model_dir=args.logs,
-                              custom_build_fpn_mask_graph=humans_build_fpn_mask_graph)
-    if args.model.lower() == "last":
-            # Find last trained weights
-        model_path = model.find_last()
-    else:
-        model_path = args.model
-
-    logging.info("Loading weights %s", model_path)
-    model.load_weights(model_path,
-                       by_name=True)
+    model = load_model(mode="inference",config=config,**args)
 
     image = ImageFile(args.image_path).read_image()
     results = model.detect([image], verbose=1)[0]
@@ -885,20 +876,26 @@ def eval_image(args):
     final_class_ids = results["class_ids"]
     final_scores = results["scores"]
     final_masks = results["masks"]
-    
-    logging.debug("Number of ROI found %s", len(final_rois))
+
+    logging.debug("Number of ROI found %s, loggint at most 4", len(final_rois))
+    max_people = 4
+    best_scores = np.trim(np.reverse(np.argsort(final_scores)),max_people)
 
     fig = plt.figure(figsize=(15,10))
-    gs = gridspec.GridSpec(1, 1)
+    gs = gridspec.GridSpec(2, 4)
     ax1 = plt.subplot(gs[0, 0])
     plt.sca(ax1)
     plt.imshow(image)
 
-    for i in range(len(final_rois)):
-        roi = final_rois[i]
-        class_id = final_class_ids[i]
-        score  = final_scores[i]
-        mask   = final_masks[:,:,i]
+    mask = image.load_mask()
+    
+    for i in range(len(best_scores)):
+        index = best_scores[i]
+        roi = final_rois[index]
+        logging.debug("Roi %s", roi) 
+        class_id = final_class_ids[index]
+        score  = final_scores[index]
+        mask   = final_masks[:,:,index]
         mask_bool = mask!=0
         mask_colour = np.zeros((mask.shape[0], mask.shape[1],4))
         mask_colour[:,:,0][mask_bool] = 1.0

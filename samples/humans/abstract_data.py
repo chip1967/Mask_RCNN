@@ -130,7 +130,7 @@ class Joint(object):
                  x,
                  y,
                  visible=None):
-        assert(isinstance(position,JointPosition), "Should be JointPosition")
+        assert type(position) is JointPosition, "Should be JointPosition"
         self.position = position
         self.x = x
         self.y = y
@@ -185,13 +185,22 @@ class Image(object):
         self.occlusions = occlusions
 
     def create_occlusion_mask(self):
-        mask = np.zeros((self.height, self.width), dtype='int')
+        mask = np.zeros((self.height, self.width), dtype='bool')
         for occlusion in self.occlusions:
             occlusion.add_to_mask(mask)
         return mask
 
     def __str__(self):
         return "Image[{},num people:{}]".format(self.image_data, len(self.people))
+
+    def merge_occlusion(mask, occlusion_mask):
+        mask[occlusion_mask] = 2
+        return mask
+    
+    def load_masks(self):
+        occlusion_mask = self.create_occlusion_mask().astype('bool')
+        mask = np.stack([Image.merge_occlusion(person.regions_to_mask(self).astype('uint8'), occlusion_mask) for person in self.people if person.regions is not None], axis=2)
+        return mask
 
     @property    
     def has_dp_data(self):
@@ -259,14 +268,16 @@ class Image(object):
         image  = self.image_data.read_image()            
         if self.occlusions is not None:
             mask = self.create_occlusion_mask()
-            logging.debug("Created occlusion mask %s", np.sum(mask) / 1.0 / image.shape[0] / image.shape[1])
             mask_image = np.zeros((image.shape[0], image.shape[1], 4))
             mask_image[mask,0] = 0.5 
             mask_image[mask,1] = 0.5 
             mask_image[mask,3] = 0.8
-            print(mask)
             plt.imshow(mask, extent=(0, image.shape[1], image.shape[0], 0))
-            
+
+    def show_mask(self,person_index):
+        mask = self.load_masks()[:,:,person_index]
+        mask_vis = cv2.applyColorMap( (mask*15).astype(np.uint8) , cv2.COLORMAP_PARULA)[:,:,:]
+        plt.imshow(mask_vis, extent=(0, self.width, self.height, 0))
 
 class ImageSet(object):
 

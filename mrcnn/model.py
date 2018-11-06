@@ -1218,6 +1218,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
         defined in MINI_MASK_SHAPE.
     """
     # Load image and mask
+    logging.debug("Loading data for image %s", image_id)
     image = dataset.load_image(image_id)
     mask, class_ids = dataset.load_mask(image_id)
     original_shape = image.shape
@@ -1293,6 +1294,7 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     image_meta = compose_image_meta(image_id, original_shape, image.shape,
                                     window, scale, active_class_ids)
 
+    logging.debug("Finished loading data for image %s", image_id)
     return image, image_meta, class_ids, bbox, mask
 
 
@@ -2691,7 +2693,7 @@ class MaskRCNN():
         boxes = detections[:N, :4]
         class_ids = detections[:N, 4].astype(np.int32)
         scores = detections[:N, 5]
-        masks = mrcnn_mask[np.arange(N), :, :, class_ids]
+        masks = mrcnn_mask[np.arange(N), :, :, class_ids, 3]
 
         # Translate normalized coordinates in the resized image to pixel
         # coordinates in the original image before resizing
@@ -2737,7 +2739,7 @@ class MaskRCNN():
         rois: [N, (y1, x1, y2, x2)] detection bounding boxes
         class_ids: [N] int class IDs
         scores: [N] float probability scores for the class IDs
-        masks: [H, W, N] instance binary masks
+        masks: [H, W, N, 3] instance binary masks
         """
         assert self.mode == "inference", "Create model in inference mode."
         assert len(
