@@ -721,7 +721,7 @@ def custom_mrcnn_mask_loss_graph(target_masks, target_class_ids, pred_masks):
 #  Training
 ############################################################
 
-def load_model(mode="inference", config=None, logs=None, model=None, model_exclude=None):
+def load_model(mode="inference", config=None, logs=None, model=None, model_exclude=None, **kwargs):
     rcnn_model = modellib.MaskRCNN(mode=mode,
                               config=config,
                               model_dir=logs,
