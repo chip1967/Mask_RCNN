@@ -114,6 +114,8 @@ class HumanConfig(Config):
     # Number of classes (including background)
     NUM_CLASSES = 2 # // 1 + 80  # COCO has 80 classes
 
+    STEPS_PER_EPOCH = 5000
+    
 ############################################################
 #  Data
 ############################################################
