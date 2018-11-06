@@ -825,7 +825,7 @@ def train(args):
     config       = HumanConfig()
     config.display()
     # build the model
-    model = load_model(mode="training",config=config,**args)
+    model = load_model(mode="training",config=config,**args.__dict__)
 
     dataset_train = DensePoseDataSet(data_train)
     dataset_train.load_prepare()
@@ -868,7 +868,7 @@ def train(args):
 def eval_image(args):
     # build the model
     config       = HumanConfig()
-    model = load_model(mode="inference",config=config,**args)
+    model = load_model(mode="inference",config=config,**args.__dict__)
 
     image = ImageFile(args.image_path).read_image()
     results = model.detect([image], verbose=1)[0]
