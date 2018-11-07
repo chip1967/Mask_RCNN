@@ -20,6 +20,7 @@ import skimage.transform
 import urllib.request
 import shutil
 import warnings
+import logging
 from distutils.version import LooseVersion
 
 # URL from which to download the latest COCO trained weights
@@ -520,6 +521,11 @@ def resize_mask(mask, scale, padding, crop=None):
         mask = np.pad(mask, padding, mode='constant', constant_values=0)
     return mask
 
+def mask_resize(mask, shape) :
+    if mask.dtype is bool:
+        return resize(mask,shape)
+    else:
+        return scipy.misc.imresize(mask, shape, 'nearest')
 
 def minimize_mask(bbox, mask, mini_shape):
     """Resize masks to a smaller version to reduce memory load.
@@ -527,17 +533,21 @@ def minimize_mask(bbox, mask, mini_shape):
 
     See inspect_data.ipynb notebook for more details.
     """
-    mini_mask = np.zeros(mini_shape + (mask.shape[-1],), dtype=bool)
+    mask_type = mask.dtype
+    mini_mask = np.zeros(mini_shape + (mask.shape[-1],), dtype=mask_type)
     for i in range(mask.shape[-1]):
         # Pick slice and cast to bool in case load_mask() returned wrong dtype
-        m = mask[:, :, i].astype(bool)
+        m = mask[:, :, i]
         y1, x1, y2, x2 = bbox[i][:4]
         m = m[y1:y2, x1:x2]
+        m_max = np.max(m)
+        m_min = np.min(m)
         if m.size == 0:
             raise Exception("Invalid bounding box with area of zero")
         # Resize with bilinear interpolation
-        m = resize(m, mini_shape)
-        mini_mask[:, :, i] = np.around(m).astype(np.bool)
+        m = mask_resize(m, mini_shape)
+        m = np.clip(np.around(m), m_min, m_max)
+        mini_mask[:, :, i] = m.astype(mask_type)
     return mini_mask
 
 
@@ -547,15 +557,19 @@ def expand_mask(bbox, mini_mask, image_shape):
 
     See inspect_data.ipynb notebook for more details.
     """
-    mask = np.zeros(image_shape[:2] + (mini_mask.shape[-1],), dtype=bool)
+    mini_mask_type = mini_mask.dtype
+    mask = np.zeros(image_shape[:2] + (mini_mask.shape[-1],), dtype=mini_mask_type)
     for i in range(mask.shape[-1]):
         m = mini_mask[:, :, i]
+        m_max = np.max(m)
+        m_min = np.min(m)
         y1, x1, y2, x2 = bbox[i][:4]
         h = y2 - y1
         w = x2 - x1
         # Resize with bilinear interpolation
-        m = resize(m, (h, w))
-        mask[y1:y2, x1:x2, i] = np.around(m).astype(np.bool)
+        m = mask_resize(m, (h, w))
+        m = np.clip(np.around(m), m_min, m_max)
+        mask[y1:y2, x1:x2, i] = m.astype(mini_mask_type)
     return mask
 
 

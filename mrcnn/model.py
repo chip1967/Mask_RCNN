@@ -1218,7 +1218,6 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
         defined in MINI_MASK_SHAPE.
     """
     # Load image and mask
-    logging.debug("Loading data for image %s", image_id)
     image = dataset.load_image(image_id)
     mask, class_ids = dataset.load_mask(image_id)
     original_shape = image.shape
@@ -1261,13 +1260,14 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
         det = augmentation.to_deterministic()
         image = det.augment_image(image)
         # Change mask to np.uint8 because imgaug doesn't support np.bool
+        mask_type = mask.dtype
         mask = det.augment_image(mask.astype(np.uint8),
                                  hooks=imgaug.HooksImages(activator=hook))
         # Verify that shapes didn't change
         assert image.shape == image_shape, "Augmentation shouldn't change image size"
         assert mask.shape == mask_shape, "Augmentation shouldn't change mask size"
-        # Change mask back to bool
-        mask = mask.astype(np.bool)
+        # Change mask back to original type
+        mask = mask.astype(mask_type)
 
     # Note that some boxes might be all zeros if the corresponding mask got cropped out.
     # and here is to filter them out
@@ -1294,7 +1294,6 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     image_meta = compose_image_meta(image_id, original_shape, image.shape,
                                     window, scale, active_class_ids)
 
-    logging.debug("Finished loading data for image %s", image_id)
     return image, image_meta, class_ids, bbox, mask
 
 
@@ -1746,7 +1745,7 @@ class DataGenerator(keras.utils.Sequence):
                         rois, mrcnn_class_ids, mrcnn_bbox, mrcnn_mask =\
                             build_detection_targets(
                                 rpn_rois, gt_class_ids, gt_boxes, gt_masks, self.config)
-                    
+
                 if b == 0:
                     batch_image_meta = np.zeros(
                         (self.batch_size,) + image_meta.shape, dtype=image_meta.dtype)
@@ -1801,10 +1800,9 @@ class DataGenerator(keras.utils.Sequence):
                         batch_mrcnn_mask[b] = mrcnn_mask
                     
             except (GeneratorExit, KeyboardInterrupt):
-                print("Problem with image [2] {} {}".format(image_id, self.dataset.image_info[image_id]['image'].image_data))
+                logging.exception("Problem with image [2] {} {}".format(image_id, self.dataset.image_info[image_id]['image'].image_data))
                 raise
             except:
-                print("Problem with image {} {}".format(image_id, self.dataset.image_info[image_id]['image'].image_data))
                 logging.exception("Error processing image {}".format(
                     self.dataset.image_info[image_id]['image'].image_data))
                 raise
@@ -2462,7 +2460,6 @@ class MaskRCNN():
         for layer in layers:
             # Is the layer a model?
             if layer.__class__.__name__ == 'Model':
-                print("In model: ", layer.name)
                 self.set_trainable(
                     layer_regex, keras_model=layer, indent=indent + 4)
                 continue
@@ -2586,10 +2583,10 @@ class MaskRCNN():
 
         # Callbacks
         callbacks = [
-            MaskRCNNTensorBoard(log_dir=self.log_dir,
-                                histogram_freq=0, write_graph=True, write_images=False),
-            # keras.callbacks.TensorBoard(log_dir=self.log_dir,
-            #                             histogram_freq=0, write_graph=True, write_images=False),
+            # MaskRCNNTensorBoard(log_dir=self.log_dir,
+            #                     histogram_freq=0, write_graph=True, write_images=False),
+            keras.callbacks.TensorBoard(log_dir=self.log_dir,
+                                        histogram_freq=0, write_graph=True, write_images=False),
             keras.callbacks.ModelCheckpoint(self.checkpoint_path,
                                             verbose=0, save_weights_only=True),
         ]

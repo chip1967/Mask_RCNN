@@ -37,7 +37,7 @@ class Occlusion(object):
 
 class DataOccluder(object):
 
-    def __init__(self,pascal_voc_root_path):
+    def __init__(self,pascal_voc_root_path, max_occlusion_objects=None):
         logging.getLogger('PIL.PngImagePlugin').setLevel(logging.INFO)
         logging.debug("Loading occlusion data from %s", pascal_voc_root_path)
         occluders = []
@@ -45,7 +45,7 @@ class DataOccluder(object):
         annotation_paths = DataOccluder.list_filepaths(os.path.join(pascal_voc_root_path, 'Annotations'))
         for annotation_path in annotation_paths:
 
-            if len(occluders) > 1000:
+            if max_occlusion_objects is not None and len(occluders) > max_occlusion_objects:
                  continue
             
             xml_root = xml.etree.ElementTree.parse(annotation_path).getroot()

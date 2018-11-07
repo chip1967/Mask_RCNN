@@ -761,8 +761,11 @@ def add_data_common_args(parser):
     parser.add_argument('--occlude-data-path', required=False,
                         metavar="<path to VOC data>",
                         help='Path to pascal VOC data for occlusion')
+    parser.add_argument('--max-occlusion-objects', required=False,
+                        metavar="<max number of occlusion objects to load>",
+                        help='Max number of occlusion objects to load')
     
-def load_data(data_type, dataset, subset, occlude_data_path, **kwargs):
+def load_data(data_type, dataset, subset, occlude_data_path, max_occlusion_objects=None, **kwargs):
     logging.debug("Loading data of type %sm=, subset %s from location %s", data_type, subset, dataset)
     if data_type.upper() == "COCO":
         data = CocoData(dataset,subset,kwargs['year'])
@@ -775,7 +778,7 @@ def load_data(data_type, dataset, subset, occlude_data_path, **kwargs):
         raise Exception("Unkown data {}".format(args.data_type))
     if occlude_data_path != None:
         logging.debug("Adding occlusions to the data")
-        occluder = DataOccluder(occlude_data_path)
+        occluder = DataOccluder(occlude_data_path, max_occlusion_objects=max_occlusion_objects)
         data = OccludedData(occluder, data)
     return data
 
