@@ -11,6 +11,12 @@ h5py
 imgaug
 IPython[all]
 
+chumpy
+opendr
+
 wget
 
-
+#PyOpenGL
+#PyOpenGL-accelerate
+#bottleneck
+#glfw

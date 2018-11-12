@@ -62,7 +62,11 @@ from pycocotools.cocoeval import COCOeval
 from pycocotools import mask as maskUtils
 
 import zipfile
-import urllib.request
+if sys.version_info[:3] > (3,0):
+    import urllib.request
+else:
+    import urllib2
+    
 import shutil
 
 import tensorflow as tf

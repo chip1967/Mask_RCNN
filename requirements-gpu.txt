@@ -12,3 +12,7 @@ imgaug
 IPython[all]
 
 wget
+PyOpenGL
+PyOpenGL-accelerate
+bottleneck
+glfw

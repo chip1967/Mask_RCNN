@@ -17,7 +17,10 @@ import scipy
 import skimage.color
 import skimage.io
 import skimage.transform
-import urllib.request
+if sys.version_info[:3] > (3,0):
+    import urllib.request
+else:
+    import urllib2
 import shutil
 import warnings
 import logging
@@ -525,7 +528,7 @@ def mask_resize(mask, shape) :
     if mask.dtype is bool:
         return resize(mask,shape)
     else:
-        return scipy.misc.imresize(mask, shape, 'nearest')
+        return (scipy.misc.imresize((mask * 255).astype('uint8'), shape, 'nearest') / 256).astype(mask.dtype)
 
 def minimize_mask(bbox, mask, mini_shape):
     """Resize masks to a smaller version to reduce memory load.
@@ -586,15 +589,23 @@ def unmold_mask(mask, bbox, image_shape):
 
     Returns a binary mask with the same size as the original image.
     """
+    mask_type = mask.dtype
     threshold = 0.5
     y1, x1, y2, x2 = bbox
-    mask = np.argmax(mask, axis=2)
-    mask = resize(mask, (y2 - y1, x2 - x1))
-    mask = np.where(mask >= threshold, 1, 0).astype(np.bool)
-
+    logging.debug("Mask shape %s",mask.shape)
+    if mask_type is bool:
+        mask = np.where(mask >= threshold, 1, 0).astype(np.bool)
+    """
+    else:
+        mask = np.argmax(mask, axis=2)
+    """
+    logging.debug("Mask shape %s",mask.shape)
+    mask = mask_resize(mask, (y2 - y1, x2 - x1))
+    logging.debug("Mask shape %s",mask.shape)
     # Put the mask in the right location.
-    full_mask = np.zeros(image_shape[:2], dtype=np.bool)
+    full_mask = np.zeros(image_shape[:2] + mask.shape[2:], mask_type)
     full_mask[y1:y2, x1:x2] = mask
+    logging.debug("Mask shape %s",full_mask.shape)
     return full_mask
 
 

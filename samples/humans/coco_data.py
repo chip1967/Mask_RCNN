@@ -22,6 +22,41 @@ from abstract_data import *
 #  Coco Data
 ############################################################
 
+class CocoDpData() :
+
+    def __init__(self,ann):
+       self.mask_polys = ann['dp_masks']
+       self.dp_x = ann['dp_x']
+       self.dp_y = ann['dp_y']
+       self.dp_I = ann['dp_I']
+       self.dp_U = ann['dp_U']
+       self.dp_V = ann['dp_V']
+
+    def make_mask(self):
+        dp_mask = np.zeros([256,256])
+        for i in range(1,15):
+            if(self.mask_polys[i-1]):
+                current_mask = mask_utils.decode(self.mask_polys[i-1])
+                dp_mask[current_mask>0] = i
+        return dp_mask
+
+class CocoImage(Image):
+
+    def __init__(self,
+                 coco_image,
+                 image_data,
+                 height,
+                 width,
+                 people,
+                 occlusions=None,
+                 pano_image_path=None):
+        Image.__init__(self, image_data=image_data, height=height, width=width, people=people, occlusions=None)
+        self.coco_image = coco_image
+        self.pano_image_path=pano_image_path
+
+    def load_pano_image(self):
+        return skimage.io.imread(self.pano_image_path)
+        
 class CocoData(object):
     """
     Coco data set support - utilises cocoapi. Not a great dataset for humans. For example no way of telling what is background and what is occlusion
@@ -121,27 +156,17 @@ class CocoData(object):
                 else:
                     joints = None
                 if 'dp_masks' in ann:
-                    mask_polys = ann['dp_masks']
-                    dp_mask = np.zeros([256,256])
-                    for i in range(1,15):
-                        if(mask_polys[i-1]):
-                            current_mask = mask_utils.decode(mask_polys[i-1])
-                            dp_mask[current_mask>0] = i
-                    dp_data = {
-                        'dp_x':ann['dp_x'],
-                        'dp_y':ann['dp_y'],
-                        'dp_I':ann['dp_I'],
-                        'dp_U':ann['dp_U'],
-                        'dp_V':ann['dp_V']
-                    }
+                    dp_data = CocoDpData(ann)
                 else:
                     dp_data = None
-                    dp_mask = None
-                people.append(Person(joints=joints,regions=regions, bbox=bbox, dp_data=dp_data, dp_mask = dp_mask))
-            image_obj = Image(ImageFile(image_path),
-                              height=image['height'],
-                              width=image['width'],
-                              people=people)
+                people.append(Person(joints=joints,regions=regions, bbox=bbox, dp_data=dp_data))
+            pano_image_path = os.path.join(self.dataset_dir, 'images', "panoptic_{}{}".format(self.image_subset, self.year), os.path.splitext(image['file_name'])[0]+".png")
+            image_obj = CocoImage(coco_image = image,
+                                  image_data = ImageFile(image_path),
+                                  height = image['height'],
+                                  width = image['width'],
+                                  people = people,
+                                  pano_image_path = pano_image_path)
             image_objs.append(image_obj)
         return ImageSet(image_objs)
 

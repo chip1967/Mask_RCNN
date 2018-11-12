@@ -1,6 +1,6 @@
-[submodule "tf_smpl"]
-	path = tf_smpl
-	url = https://github.com/blzq/tf_smpl
 [submodule "synthetic_occlusion"]
 	path = synthetic_occlusion
 	url = https://github.com/isarandi/synthetic-occlusion.git
+[submodule "opendr"]
+	path = opendr
+	url = https://github.com/polmorenoc/opendr.git

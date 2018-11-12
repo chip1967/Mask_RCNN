@@ -145,13 +145,11 @@ class Person(object):
                  joints = None,
                  regions = None,
                  bbox = None,
-                 dp_data = None,
-                 dp_mask = None):
+                 dp_data = None):
         self.joints   = joints
         self.regions  = regions
         self.bbox     = bbox
         self.dp_data  = dp_data
-        self.dp_mask  = dp_mask
 
     def get_joint(self,joint_position):
         assert(isinstance(joint_position, JointPosition))
@@ -186,8 +184,9 @@ class Image(object):
 
     def create_occlusion_mask(self):
         mask = np.zeros((self.height, self.width), dtype='bool')
-        for occlusion in self.occlusions:
-            occlusion.add_to_mask(mask)
+        if self.occlusions:
+            for occlusion in self.occlusions:
+                occlusion.add_to_mask(mask)
         return mask
 
     def __str__(self):
