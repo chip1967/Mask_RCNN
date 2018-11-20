@@ -4,3 +4,6 @@
 [submodule "opendr"]
 	path = opendr
 	url = https://github.com/polmorenoc/opendr.git
+[submodule "tf_smpl"]
+	path = tf_smpl
+	url = https://github.com/chip1967/tf_smpl

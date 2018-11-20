@@ -2,6 +2,7 @@ FROM tensorflow/tensorflow:1.7.0
 
 #   FROM tensorflow/tensorflow:1.7.0-py3
 #   libosmesa6-dev is for osmesa headless 3d rendering 
+#       apt-get install -y python3-tk git wget unzip tar && \
 
 RUN apt-get update && \
     apt-get install -y python3-tk git wget unzip tar && \
